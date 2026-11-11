@@ -58,6 +58,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
   String _status = 'Disconnected';
 
   bool _connected = false;
+  bool _isLoadingSettings = true;
+  String? _settingsLoadError;
   ControlMode _mode = ControlMode.mono;
 
   Offset _left = Offset.zero;
@@ -74,28 +76,58 @@ class _ControllerScreenState extends State<ControllerScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
+    final loadingStartedAt = DateTime.now();
 
-    final savedMode = prefs.getString('control_mode');
+    if (mounted) {
+      setState(() {
+        _isLoadingSettings = true;
+        _settingsLoadError = null;
+      });
+    }
 
-    setState(() {
-      _url = prefs.getString('ws_url') ?? _url;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
 
-      switch (savedMode) {
-        case 'dual':
-          _mode = ControlMode.dual;
-          break;
-        case 'accelerometer':
-          _mode = ControlMode.accelerometer;
-          break;
-        default:
-          _mode = ControlMode.mono;
+      const minimumLoadingDuration = Duration(milliseconds: 700);
+      final remainingLoadingDuration =
+          minimumLoadingDuration - DateTime.now().difference(loadingStartedAt);
+      if (remainingLoadingDuration > Duration.zero) {
+        await Future<void>.delayed(remainingLoadingDuration);
       }
-    });
+      if (!mounted) return;
 
-    if (_mode == ControlMode.accelerometer) {
-      _startAccelerometer();
+      final savedMode = prefs.getString('control_mode');
+
+      setState(() {
+        _url = prefs.getString('ws_url') ?? _url;
+
+        switch (savedMode) {
+          case 'dual':
+            _mode = ControlMode.dual;
+            break;
+          case 'accelerometer':
+            _mode = ControlMode.accelerometer;
+            break;
+          default:
+            _mode = ControlMode.mono;
+        }
+
+        _isLoadingSettings = false;
+      });
+
+      if (_mode == ControlMode.accelerometer) {
+        _startAccelerometer();
+      }
+    } catch (error) {
+      debugPrint('Settings load error: $error');
+
+      if (mounted) {
+        setState(() {
+          _isLoadingSettings = false;
+          _settingsLoadError = 'Could not load saved settings.';
+        });
+      }
     }
   }
 
@@ -371,188 +403,245 @@ class _ControllerScreenState extends State<ControllerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 55,
-        title: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.gamepad, color: Colors.cyan),
-            SizedBox(width: 10),
-            Text(
-              'WiFi Controller',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-        actions: [
-          Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: _connected
-                    ? Colors.green.withOpacity(0.15)
-                    : Colors.red.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(20),
+      appBar: _isLoadingSettings || _settingsLoadError != null
+          ? null
+          : AppBar(
+              toolbarHeight: 55,
+              title: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Image.asset(
+                  'assets/icon/wordmark.png',
+                  height: 40,
+                  fit: BoxFit.contain,
+                  semanticLabel: 'Khel Niyantro',
+                ),
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.circle,
-                    size: 9,
-                    color: _connected ? Colors.green : Colors.red,
+              actions: [
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _connected
+                          ? Colors.green.withOpacity(0.15)
+                          : Colors.red.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.circle,
+                          size: 9,
+                          color: _connected ? Colors.green : Colors.red,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(_status, style: const TextStyle(fontSize: 12)),
+                      ],
+                    ),
                   ),
-                  const SizedBox(width: 6),
-                  Text(_status, style: const TextStyle(fontSize: 12)),
+                ),
+                const SizedBox(width: 12),
+                IconButton(
+                  onPressed: _openSettings,
+                  icon: const Icon(Icons.settings),
+                  tooltip: 'Configuration',
+                ),
+                const SizedBox(width: 8),
+              ],
+            ),
+      body: _isLoadingSettings
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.gamepad, color: Colors.cyan, size: 42),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Loading WiFi Controller',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 20),
+                  const SizedBox(
+                    width: 30,
+                    height: 30,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3,
+                      color: Colors.cyan,
+                    ),
+                  ),
                 ],
               ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          IconButton(
-            onPressed: _openSettings,
-            icon: const Icon(Icons.settings),
-            tooltip: 'Configuration',
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 5),
-            child: SegmentedButton<ControlMode>(
-              segments: const [
-                ButtonSegment(
-                  value: ControlMode.mono,
-                  label: Text('Mono'),
-                  icon: Icon(Icons.gamepad_outlined),
+            )
+          : _settingsLoadError != null
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    color: Colors.orangeAccent,
+                    size: 40,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(_settingsLoadError!),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: _loadSettings,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Try again'),
+                  ),
+                ],
+              ),
+            )
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: SegmentedButton<ControlMode>(
+                    segments: const [
+                      ButtonSegment(
+                        value: ControlMode.mono,
+                        label: Text('Mono'),
+                        icon: Icon(Icons.gamepad_outlined),
+                      ),
+                      ButtonSegment(
+                        value: ControlMode.dual,
+                        label: Text('Dual'),
+                        icon: Icon(Icons.sports_esports),
+                      ),
+                      ButtonSegment(
+                        value: ControlMode.accelerometer,
+                        label: Text('Motion'),
+                        icon: Icon(Icons.screen_rotation),
+                      ),
+                    ],
+                    selected: {_mode},
+                    onSelectionChanged: (selection) {
+                      _changeMode(selection.first);
+                    },
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
                 ),
-                ButtonSegment(
-                  value: ControlMode.dual,
-                  label: Text('Dual'),
-                  icon: Icon(Icons.sports_esports),
-                ),
-                ButtonSegment(
-                  value: ControlMode.accelerometer,
-                  label: Text('Motion'),
-                  icon: Icon(Icons.screen_rotation),
-                ),
-              ],
-              selected: {_mode},
-              onSelectionChanged: (selection) {
-                _changeMode(selection.first);
-              },
-              showSelectedIcon: false,
-              style: const ButtonStyle(visualDensity: VisualDensity.compact),
-            ),
-          ),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final padSize = math.max(
-                  100.0,
-                  math.min(220.0, constraints.maxHeight - 30),
-                );
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final padSize = math.max(
+                        100.0,
+                        math.min(220.0, constraints.maxHeight - 30),
+                      );
 
-                if (_mode == ControlMode.accelerometer) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        SizedBox(
-                          width: padSize,
-                          height: padSize,
-                          child: CustomPaint(
-                            painter: JoystickPainter(_accelerometer),
-                            child: const Center(
-                              child: Text(
-                                'TILT PHONE',
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                  letterSpacing: 2,
-                                  fontWeight: FontWeight.bold,
+                      if (_mode == ControlMode.accelerometer) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: padSize,
+                                height: padSize,
+                                child: CustomPaint(
+                                  painter: JoystickPainter(_accelerometer),
+                                  child: const Center(
+                                    child: Text(
+                                      'TILT PHONE',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                        letterSpacing: 2,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
                                 ),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Tilt your phone to control movement',
+                                style: TextStyle(color: Colors.white60),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      if (_mode == ControlMode.mono) {
+                        return Center(
+                          child: FittedBox(
+                            fit: BoxFit.contain,
+                            child: JoystickPad(
+                              size: padSize,
+                              value: _left,
+                              label: 'MAIN JOYSTICK',
+                              onChanged: _updateLeft,
+                            ),
+                          ),
+                        );
+                      }
+
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: Center(
+                              child: JoystickPad(
+                                size: padSize,
+                                value: _left,
+                                label: 'LEFT JOYSTICK',
+                                onChanged: _updateLeft,
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Tilt your phone to control movement',
-                          style: TextStyle(color: Colors.white60),
-                        ),
+                          Expanded(
+                            child: Center(
+                              child: JoystickPad(
+                                size: padSize,
+                                value: _right,
+                                label: 'RIGHT JOYSTICK',
+                                onChanged: _updateRight,
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(
+                    bottom: 6,
+                    left: 12,
+                    right: 12,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (_mode == ControlMode.accelerometer) ...[
+                        _coordinate('AX', _accelerometer.dx * 5),
+                        const SizedBox(width: 20),
+                        _coordinate('AY', _accelerometer.dy * 5),
+                      ] else ...[
+                        _coordinate('LX', _left.dx * 5),
+                        const SizedBox(width: 20),
+                        _coordinate('LY', _left.dy * 5),
+                        if (_mode == ControlMode.dual) ...[
+                          const SizedBox(width: 25),
+                          _coordinate('RX', _right.dx * 5),
+                          const SizedBox(width: 20),
+                          _coordinate('RY', _right.dy * 5),
+                        ],
                       ],
-                    ),
-                  );
-                }
-
-                if (_mode == ControlMode.mono) {
-                  return Center(
-                    child: FittedBox(
-                      fit: BoxFit.contain,
-                      child: JoystickPad(
-                        size: padSize,
-                        value: _left,
-                        label: 'MAIN JOYSTICK',
-                        onChanged: _updateLeft,
-                      ),
-                    ),
-                  );
-                }
-
-                return Row(
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: JoystickPad(
-                          size: padSize,
-                          value: _left,
-                          label: 'LEFT JOYSTICK',
-                          onChanged: _updateLeft,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Center(
-                        child: JoystickPad(
-                          size: padSize,
-                          value: _right,
-                          label: 'RIGHT JOYSTICK',
-                          onChanged: _updateRight,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6, left: 12, right: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (_mode == ControlMode.accelerometer) ...[
-                  _coordinate('AX', _accelerometer.dx * 5),
-                  const SizedBox(width: 20),
-                  _coordinate('AY', _accelerometer.dy * 5),
-                ] else ...[
-                  _coordinate('LX', _left.dx * 5),
-                  const SizedBox(width: 20),
-                  _coordinate('LY', _left.dy * 5),
-                  if (_mode == ControlMode.dual) ...[
-                    const SizedBox(width: 25),
-                    _coordinate('RX', _right.dx * 5),
-                    const SizedBox(width: 20),
-                    _coordinate('RY', _right.dy * 5),
-                  ],
-                ],
+                    ],
+                  ),
+                ),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
